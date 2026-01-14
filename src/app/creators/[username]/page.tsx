@@ -18,7 +18,8 @@ export async function generateMetadata({
     .from("sellers")
     .select("store_name, store_description")
     .eq("username", username)
-    .eq("status", "approved")
+    .eq("seller_status", "active")
+    .eq("is_suspended", false)
     .single();
 
   if (!seller) {
@@ -39,7 +40,7 @@ export default async function CreatorStorefrontPage({
   const { username } = await params;
   const supabase = await createClient();
 
-  // Get seller info
+  // Get seller info (exclude suspended sellers)
   const { data: seller, error } = await supabase
     .from("sellers")
     .select(
@@ -49,7 +50,8 @@ export default async function CreatorStorefrontPage({
     `
     )
     .eq("username", username)
-    .eq("status", "approved")
+    .eq("seller_status", "active")
+    .eq("is_suspended", false)
     .single();
 
   if (error || !seller) {
