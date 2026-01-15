@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendNewSaleEmail, sendOrderReceiptEmail } from "@/lib/email";
 import crypto from "crypto";
 
 // POST /api/paypal/checkout-webhook
@@ -9,7 +10,7 @@ import crypto from "crypto";
 export async function POST(request: Request) {
   const adminClient = createAdminClient();
   let webhookBody: any;
-  let rawBody: string;
+  let rawBody: string = "";
 
   try {
     // ========================================
@@ -80,21 +81,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ received: true, event: eventType });
       }
 
-      case "PAYMENT.CAPTURE.DENIED":
-      case "PAYMENT.CAPTURE.REFUNDED": {
-        console.log("[CHECKOUT WEBHOOK] Payment failed/refunded:", resourceId);
+      case "PAYMENT.CAPTURE.PENDING": {
+        // Payment is pending (e.g., eCheck, risk review)
+        console.log("[CHECKOUT WEBHOOK] Payment pending:", resourceId);
 
-        // Update order status if exists
         const captureId = webhookBody.resource?.id;
         if (captureId) {
           await adminClient
             .from("orders")
-            .update({
-              status:
-                eventType === "PAYMENT.CAPTURE.REFUNDED"
-                  ? "refunded"
-                  : "failed",
-            })
+            .update({ payment_status: "pending" })
             .eq("paypal_capture_id", captureId);
         }
 
@@ -107,6 +102,55 @@ export async function POST(request: Request) {
         });
 
         return NextResponse.json({ received: true, event: eventType });
+      }
+
+      case "PAYMENT.CAPTURE.DENIED": {
+        console.log("[CHECKOUT WEBHOOK] Payment denied:", resourceId);
+
+        const captureId = webhookBody.resource?.id;
+        if (captureId) {
+          await adminClient
+            .from("orders")
+            .update({ payment_status: "failed" })
+            .eq("paypal_capture_id", captureId);
+        }
+
+        await adminClient.from("webhook_logs").insert({
+          webhook_type: "paypal_checkout",
+          event_type: eventType,
+          resource_id: resourceId,
+          payload: webhookBody,
+          processed: true,
+        });
+
+        return NextResponse.json({ received: true, event: eventType });
+      }
+
+      case "PAYMENT.CAPTURE.REFUNDED":
+      case "PAYMENT.CAPTURE.REVERSED": {
+        // CRITICAL: Handle refunds and reversals
+        // Must revoke access and reverse seller earnings
+        console.log(
+          "[CHECKOUT WEBHOOK] Payment refunded/reversed:",
+          resourceId
+        );
+
+        const result = await handleRefundOrReversal(
+          webhookBody,
+          eventType,
+          adminClient
+        );
+
+        await adminClient.from("webhook_logs").insert({
+          webhook_type: "paypal_checkout",
+          event_type: eventType,
+          resource_id: resourceId,
+          payload: webhookBody,
+          processed: result.success,
+          error_message: result.error || null,
+        });
+
+        return NextResponse.json(result);
       }
 
       default: {
@@ -333,6 +377,114 @@ async function handleCaptureCompleted(
 
     console.log("[CHECKOUT WEBHOOK] Fulfillment result:", result);
 
+    // ========================================
+    // SEND EMAIL NOTIFICATIONS
+    // ========================================
+    if (result?.success && !result?.idempotent) {
+      try {
+        // Fetch order with items and seller info for email
+        const { data: orderData } = await adminClient
+          .from("orders")
+          .select(
+            `
+            id,
+            buyer_email,
+            buyer_name,
+            total_amount,
+            receipt_token,
+            order_items (
+              price,
+              product_id,
+              product:products (
+                title,
+                seller_id,
+                seller:sellers (
+                  id,
+                  user_id,
+                  profile:profiles (
+                    full_name,
+                    email
+                  )
+                )
+              )
+            )
+          `
+          )
+          .eq("id", orderId)
+          .single();
+
+        if (orderData) {
+          const baseUrl =
+            process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+          const orderShortId = orderId.slice(0, 8).toUpperCase();
+
+          // 1. Send receipt to buyer
+          const receiptUrl = orderData.receipt_token
+            ? `${baseUrl}/purchases/${orderData.receipt_token}`
+            : `${baseUrl}/dashboard/purchases/${orderId}`;
+
+          const items = (orderData.order_items || []).map((item: any) => ({
+            title: item.product?.title || "Product",
+            price: item.price || 0,
+          }));
+
+          await sendOrderReceiptEmail({
+            orderId,
+            buyerEmail: orderData.buyer_email || "",
+            buyerName: orderData.buyer_name || "Customer",
+            orderShortId,
+            totalAmount: orderData.total_amount || 0,
+            receiptUrl,
+            items,
+          });
+          console.log(
+            "[CHECKOUT WEBHOOK] Receipt email sent to:",
+            orderData.buyer_email
+          );
+
+          // 2. Send sale notification to each seller
+          const sellersNotified = new Set<string>();
+
+          for (const item of orderData.order_items || []) {
+            const product = item.product as any;
+            const seller = product?.seller as any;
+            const profile = seller?.profile;
+
+            if (seller?.id && !sellersNotified.has(seller.id)) {
+              sellersNotified.add(seller.id);
+
+              const sellerEmail = profile?.email;
+              const sellerName = profile?.full_name || "Seller";
+              const saleAmount = item.price || 0;
+              const sellerEarnings = saleAmount * 0.9; // 90% after platform fee
+
+              if (sellerEmail) {
+                await sendNewSaleEmail({
+                  sellerId: seller.id,
+                  sellerEmail,
+                  sellerName,
+                  productTitle: product.title || "Product",
+                  saleAmount,
+                  sellerEarnings,
+                  buyerName: orderData.buyer_name || "Customer",
+                });
+                console.log(
+                  "[CHECKOUT WEBHOOK] Sale notification sent to:",
+                  sellerEmail
+                );
+              }
+            }
+          }
+        }
+      } catch (emailError) {
+        // Don't fail the order if email fails
+        console.error(
+          "[CHECKOUT WEBHOOK] Email notification error:",
+          emailError
+        );
+      }
+    }
+
     // The RPC returns a JSONB object
     if (result && typeof result === "object") {
       return {
@@ -346,6 +498,181 @@ async function handleCaptureCompleted(
     return { success: true, message: "Order fulfilled" };
   } catch (error) {
     console.error("[CHECKOUT WEBHOOK] Handle capture error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+// ========================================
+// HANDLE REFUND OR REVERSAL
+// ========================================
+async function handleRefundOrReversal(
+  webhookBody: any,
+  eventType: string,
+  adminClient: ReturnType<typeof createAdminClient>
+): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  try {
+    const capture = webhookBody.resource;
+    const captureId = capture?.id;
+
+    if (!captureId) {
+      return { success: false, error: "Missing capture ID" };
+    }
+
+    console.log(
+      "[CHECKOUT WEBHOOK] Processing refund/reversal for capture:",
+      captureId
+    );
+
+    // Determine the new status
+    const newStatus =
+      eventType === "PAYMENT.CAPTURE.REFUNDED" ? "refunded" : "reversed";
+
+    // ========================================
+    // 1. FIND THE ORDER BY CAPTURE ID
+    // ========================================
+    const { data: order, error: orderError } = await adminClient
+      .from("orders")
+      .select("id, payment_status, total_amount, receipt_token")
+      .eq("paypal_capture_id", captureId)
+      .single();
+
+    if (orderError || !order) {
+      console.error(
+        "[CHECKOUT WEBHOOK] Order not found for capture:",
+        captureId
+      );
+      return { success: false, error: "Order not found for this capture" };
+    }
+
+    // Check if already processed
+    if (
+      order.payment_status === "refunded" ||
+      order.payment_status === "reversed"
+    ) {
+      console.log("[CHECKOUT WEBHOOK] Already refunded/reversed:", order.id);
+      return { success: true, message: "Already processed" };
+    }
+
+    console.log(
+      "[CHECKOUT WEBHOOK] Found order:",
+      order.id,
+      "Current status:",
+      order.payment_status
+    );
+
+    // ========================================
+    // 2. UPDATE ORDER PAYMENT STATUS
+    // ========================================
+    const { error: updateOrderError } = await adminClient
+      .from("orders")
+      .update({
+        payment_status: newStatus,
+        // Invalidate receipt token to prevent downloads
+        receipt_token: null,
+        refunded_at: new Date().toISOString(),
+      })
+      .eq("id", order.id);
+
+    if (updateOrderError) {
+      console.error(
+        "[CHECKOUT WEBHOOK] Failed to update order:",
+        updateOrderError
+      );
+      return { success: false, error: "Failed to update order status" };
+    }
+
+    console.log("[CHECKOUT WEBHOOK] Updated order status to:", newStatus);
+
+    // ========================================
+    // 3. REVERSE SELLER EARNINGS
+    // ========================================
+    // Get all earnings for this order
+    const { data: earnings, error: earningsError } = await adminClient
+      .from("seller_earnings")
+      .select("id, seller_id, net_amount, status")
+      .eq("order_id", order.id);
+
+    if (earningsError) {
+      console.error(
+        "[CHECKOUT WEBHOOK] Failed to fetch earnings:",
+        earningsError
+      );
+    }
+
+    if (earnings && earnings.length > 0) {
+      console.log(
+        "[CHECKOUT WEBHOOK] Found",
+        earnings.length,
+        "earning records to reverse"
+      );
+
+      for (const earning of earnings) {
+        // Mark earning as refunded
+        await adminClient
+          .from("seller_earnings")
+          .update({
+            status: "refunded",
+            refunded_at: new Date().toISOString(),
+          })
+          .eq("id", earning.id);
+
+        // Deduct from seller's balance based on earning status
+        if (earning.status === "released" || earning.status === "available") {
+          // Already released to available balance - deduct from available
+          await adminClient.rpc("decrement_seller_available_balance", {
+            p_seller_id: earning.seller_id,
+            p_amount: earning.net_amount,
+          });
+          console.log(
+            "[CHECKOUT WEBHOOK] Deducted from available balance:",
+            earning.net_amount
+          );
+        } else if (
+          earning.status === "pending" ||
+          earning.status === "escrow"
+        ) {
+          // Still in escrow - deduct from pending balance
+          await adminClient.rpc("decrement_seller_pending_balance", {
+            p_seller_id: earning.seller_id,
+            p_amount: earning.net_amount,
+          });
+          console.log(
+            "[CHECKOUT WEBHOOK] Deducted from pending balance:",
+            earning.net_amount
+          );
+        }
+
+        // Also deduct from total earnings
+        await adminClient.rpc("decrement_seller_total_earnings", {
+          p_seller_id: earning.seller_id,
+          p_amount: earning.net_amount,
+        });
+      }
+    }
+
+    // ========================================
+    // 4. LOG THE REFUND EVENT
+    // ========================================
+    console.log(
+      "[CHECKOUT WEBHOOK] Refund/reversal processed successfully for order:",
+      order.id
+    );
+
+    return {
+      success: true,
+      message: `Order ${order.id} marked as ${newStatus}. ${
+        earnings?.length || 0
+      } seller earnings reversed.`,
+    };
+  } catch (error) {
+    console.error("[CHECKOUT WEBHOOK] Handle refund error:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
