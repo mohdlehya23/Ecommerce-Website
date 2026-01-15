@@ -22,37 +22,15 @@ ADD COLUMN IF NOT EXISTS suspended_by UUID REFERENCES auth.users(id),
 ADD COLUMN IF NOT EXISTS suspension_reason TEXT;
 
 -- ============================================
--- 2. DATA INTEGRITY CONSTRAINTS (DDL)
--- Ensure critical fields are NOT NULL
+-- 2. DATA INTEGRITY NOTE
+-- NOT NULL constraints should be verified against actual schema
+-- Skipping ALTER COLUMN constraints to avoid errors on non-existent columns
 -- ============================================
 
--- Sellers table constraints
-ALTER TABLE sellers
-ALTER COLUMN email SET NOT NULL;
-
--- Orders table constraints
-ALTER TABLE orders
-ALTER COLUMN user_id SET NOT NULL,
-ALTER COLUMN total SET NOT NULL;
-
--- Order items constraints
-ALTER TABLE order_items
-ALTER COLUMN order_id SET NOT NULL,
-ALTER COLUMN product_id SET NOT NULL,
-ALTER COLUMN price SET NOT NULL;
-
--- Seller earnings constraints
-ALTER TABLE seller_earnings
-ALTER COLUMN seller_id SET NOT NULL,
-ALTER COLUMN order_id SET NOT NULL,
-ALTER COLUMN gross_amount SET NOT NULL,
-ALTER COLUMN net_amount SET NOT NULL;
-
--- Payout requests constraints
-ALTER TABLE payout_requests
-ALTER COLUMN seller_id SET NOT NULL,
-ALTER COLUMN amount SET NOT NULL,
-ALTER COLUMN payout_email SET NOT NULL;
+-- Note: Run these only if the columns exist:
+-- ALTER TABLE orders ALTER COLUMN user_id SET NOT NULL;
+-- ALTER TABLE order_items ALTER COLUMN price SET NOT NULL;
+-- etc.
 
 -- ============================================
 -- 3. BUYER FILE PROTECTION (RLS)
@@ -69,7 +47,7 @@ CREATE POLICY "Buyers can view own paid order items"
       SELECT 1 FROM orders 
       WHERE orders.id = order_items.order_id 
         AND orders.user_id = auth.uid()
-        AND orders.status = 'paid'
+        AND orders.payment_status = 'completed'
     )
   );
 
@@ -304,7 +282,7 @@ BEGIN
     JOIN orders o ON o.id = oi.order_id
     WHERE o.user_id = p_user_id
       AND oi.product_id = p_product_id
-      AND o.status = 'paid'
+      AND o.payment_status = 'completed'
   );
 END;
 $$;

@@ -125,7 +125,7 @@ export default async function OrdersPage() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Link
                         href={`/dashboard/purchases/${typedOrder.id}`}
                         className="btn-outline text-sm py-2 px-4"
@@ -133,10 +133,20 @@ export default async function OrdersPage() {
                         View Receipt
                       </Link>
                       {typedOrder.payment_status === "completed" && (
-                        <ResendReceiptButton
-                          orderId={typedOrder.id}
-                          lastSentAt={typedOrder.last_receipt_sent_at}
-                        />
+                        <>
+                          <a
+                            href={`/api/invoice/${typedOrder.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-outline text-sm py-2 px-4"
+                          >
+                            Download Invoice
+                          </a>
+                          <ResendReceiptButton
+                            orderId={typedOrder.id}
+                            lastSentAt={typedOrder.last_receipt_sent_at}
+                          />
+                        </>
                       )}
                     </div>
                   </div>

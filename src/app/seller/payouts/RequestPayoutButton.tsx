@@ -59,13 +59,22 @@ export function RequestPayoutButton({
     );
   }
 
+  // Disable if balance is below minimum $10
+  const isBalanceTooLow = maxAmount < 10;
+
   return (
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="mt-3 w-full btn-primary text-sm py-2"
+        disabled={isBalanceTooLow}
+        className={`mt-3 w-full text-sm py-2 ${
+          isBalanceTooLow
+            ? "bg-gray-200 text-gray-500 cursor-not-allowed rounded-lg"
+            : "btn-primary"
+        }`}
+        title={isBalanceTooLow ? "Minimum withdrawal is $10.00" : undefined}
       >
-        Request Payout
+        {isBalanceTooLow ? `Minimum $10 Required` : "Request Payout"}
       </button>
 
       {/* Modal */}
