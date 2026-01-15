@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendPayoutConfirmationEmail } from "@/lib/email";
 
 // POST /api/payouts/paypal-webhook
 // Handles PayPal webhook events for payout status updates
@@ -59,6 +60,29 @@ export async function POST(request: Request) {
             transactionId
           );
 
+          // First, get the payout request with seller info
+          const { data: payoutRequest } = await adminClient
+            .from("payout_requests")
+            .select(
+              `
+              id,
+              amount,
+              payout_email,
+              seller_id,
+              seller:sellers (
+                id,
+                user_id,
+                profile:profiles (
+                  full_name,
+                  email
+                )
+              )
+            `
+            )
+            .eq("id", senderItemId)
+            .single();
+
+          // Update payout status
           const { error } = await adminClient
             .from("payout_requests")
             .update({
@@ -72,6 +96,36 @@ export async function POST(request: Request) {
 
           if (error) {
             console.error("[WEBHOOK] Failed to update item success:", error);
+          }
+
+          // Send email notification to seller
+          if (payoutRequest) {
+            const seller = payoutRequest.seller as any;
+            const profile = seller?.profile;
+            const sellerEmail = profile?.email || payoutRequest.payout_email;
+            const sellerName = profile?.full_name || "Seller";
+
+            if (sellerEmail) {
+              const emailResult = await sendPayoutConfirmationEmail({
+                payoutId: senderItemId,
+                sellerEmail,
+                sellerName,
+                amount: payoutRequest.amount,
+                paypalEmail: payoutRequest.payout_email,
+              });
+
+              if (emailResult.success) {
+                console.log(
+                  "[WEBHOOK] Payout confirmation email sent to:",
+                  sellerEmail
+                );
+              } else {
+                console.error(
+                  "[WEBHOOK] Failed to send payout email:",
+                  emailResult.error
+                );
+              }
+            }
           }
         }
         break;
