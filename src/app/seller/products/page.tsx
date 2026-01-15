@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { DeleteProductButton } from "@/components/seller/DeleteProductButton";
 
 export const metadata: Metadata = {
   title: "My Products | Seller Dashboard",
@@ -187,6 +188,10 @@ export default async function SellerProductsPage() {
                             />
                           </svg>
                         </Link>
+                        <DeleteProductButton
+                          productId={product.id}
+                          productTitle={product.title}
+                        />
                       </div>
                     </td>
                   </tr>
