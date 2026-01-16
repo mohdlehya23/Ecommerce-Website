@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -68,6 +69,26 @@ export async function GET(
       `Attempting manual fulfillment for Order ${orderId} with Capture ID ${captureIdToUse}`
     );
 
+    // Debug: Fetch order items using SERVICE ROLE to bypass RLS
+    // (In case the current user is an admin but RLS hides others' items)
+    const serviceClient = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return [];
+          },
+          setAll() {},
+        },
+      }
+    );
+
+    const { data: debugItems, error: debugError } = await serviceClient
+      .from("order_items")
+      .select("*, products(id, title, seller_id)")
+      .eq("order_id", orderId);
+
     const { data: rpcResult, error: rpcError } = await supabase.rpc(
       "fulfill_order_from_webhook",
       {
@@ -83,6 +104,8 @@ export async function GET(
           success: false,
           error: rpcError.message,
           details: rpcError,
+          debug_items: debugItems,
+          debug_error: debugError,
         },
         { status: 500 }
       );
@@ -93,6 +116,9 @@ export async function GET(
       message: "Fulfillment triggered manually",
       result: rpcResult,
       used_capture_id: captureIdToUse,
+      debug_items: debugItems, // Show what items exist (admin view)
+      earnings_check:
+        debugItems?.length === 0 ? "NO ITEMS FOUND" : "ITEMS FOUND",
     });
   } catch (error) {
     return NextResponse.json(
