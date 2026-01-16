@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ProductCard } from "@/components/products/ProductCard";
@@ -10,6 +9,7 @@ export default async function HomePage() {
   const { data: featuredProducts } = await supabase
     .from("products")
     .select("*")
+    .eq("status", "published")
     .limit(6)
     .order("created_at", { ascending: false });
 

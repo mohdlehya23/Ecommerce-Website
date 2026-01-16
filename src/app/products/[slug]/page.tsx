@@ -18,6 +18,7 @@ export async function generateMetadata({
     .from("products")
     .select("*")
     .eq("slug", slug)
+    .eq("status", "published")
     .single();
 
   if (!product) {
@@ -45,6 +46,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
     .from("products")
     .select("*")
     .eq("slug", slug)
+    .eq("status", "published")
     .single();
 
   if (!product) {

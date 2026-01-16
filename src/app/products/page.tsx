@@ -22,6 +22,7 @@ export default async function ProductsPage({
   let query = supabase
     .from("products")
     .select("*")
+    .eq("status", "published")
     .order("created_at", { ascending: false });
 
   if (category && ["ebooks", "templates", "consulting"].includes(category)) {
