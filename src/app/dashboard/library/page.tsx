@@ -40,9 +40,9 @@ export default async function LibraryPage() {
     order: Order;
   })[];
 
-  const categories = [
-    ...new Set(items.map((item) => item.product?.category).filter(Boolean)),
-  ];
+  const categories = Array.from(
+    new Set(items.map((item) => item.product?.category).filter(Boolean))
+  );
 
   return (
     <div className="section-padding">
