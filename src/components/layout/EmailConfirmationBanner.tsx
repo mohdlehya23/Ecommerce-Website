@@ -1,40 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useState } from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export function EmailConfirmationBanner() {
-  const [showBanner, setShowBanner] = useState(false);
+  const { user, profile } = useAuth();
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function checkConfirmation() {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (user) {
-        // Check if email is confirmed via profiles table (source of truth)
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("email_confirmed")
-          .eq("id", user.id)
-          .single();
-
-        // If profile exists, check its confirmation status
-        // If profile doesn't exist (edge case), fallback to user metadata or default false
-        const isConfirmed = profile
-          ? profile.email_confirmed
-          : !!user.email_confirmed_at;
-        setShowBanner(!isConfirmed);
-      }
-    }
-
-    checkConfirmation();
-  }, []);
+  // Derive visibility from context (real-time)
+  // Show if: User exists AND (Profile says incompatible OR (Profile missing and User says unconfirmed))
+  // Note: We prioritize Profile as source of truth.
+  const isConfirmed = profile?.email_confirmed ?? !!user?.email_confirmed_at;
+  const showBanner = user && !isConfirmed;
 
   const handleResendEmail = async () => {
     setSending(true);
