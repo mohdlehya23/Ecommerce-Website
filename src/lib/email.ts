@@ -447,3 +447,90 @@ export async function sendNewSaleEmail(params: {
     referenceId: params.sellerId,
   });
 }
+
+// =====================================================
+// EMAIL VERIFICATION TEMPLATE & FUNCTION
+// =====================================================
+
+/**
+ * Email Verification Template
+ */
+export function emailVerificationTemplate(params: {
+  userName: string;
+  verificationUrl: string;
+}): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head><style>${emailStyles}</style></head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✉️ Verify Your Email</h1>
+    </div>
+    <div class="content">
+      <p>Hi ${params.userName},</p>
+      <p>Welcome to Digital Store! Please verify your email address to complete your registration and access all features.</p>
+      
+      <div class="highlight-box">
+        <div class="label">Click the button below to verify</div>
+        <p style="color: #888; font-size: 14px; margin-top: 10px;">
+          This link will expire in 24 hours
+        </p>
+      </div>
+      
+      <p style="text-align: center;">
+        <a href="${params.verificationUrl}" class="button">Verify My Email</a>
+      </p>
+      
+      <p style="color: #888; font-size: 14px;">
+        If you didn't create an account with Digital Store, you can safely ignore this email.
+      </p>
+      
+      <p style="color: #666; font-size: 12px; margin-top: 30px;">
+        If the button doesn't work, copy and paste this link into your browser:<br/>
+        <a href="${
+          params.verificationUrl
+        }" style="color: #00d9ff; word-break: break-all;">${
+    params.verificationUrl
+  }</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>© ${new Date().getFullYear()} Digital Store. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Send verification email to user
+ */
+export async function sendVerificationEmail(params: {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  verificationToken: string;
+}): Promise<SendEmailResult> {
+  const baseUrl =
+    process?.env?.NEXT_PUBLIC_SITE_URL ||
+    process?.env?.NEXT_PUBLIC_VERCEL_URL ||
+    "http://localhost:3000";
+
+  // Ensure URL has https
+  const siteUrl = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
+  const verificationUrl = `${siteUrl}/api/auth/verify-email?token=${params.verificationToken}`;
+
+  return sendEmail({
+    to: params.userEmail,
+    subject: "✉️ Verify your email - Digital Store",
+    html: emailVerificationTemplate({
+      userName: params.userName,
+      verificationUrl,
+    }),
+    template: "email_verification",
+    referenceType: "verification",
+    referenceId: params.userId,
+  });
+}

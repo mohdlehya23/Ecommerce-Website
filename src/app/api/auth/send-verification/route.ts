@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendVerificationEmail } from "@/lib/email";
 import crypto from "crypto";
+
+// Force dynamic rendering
+export const dynamic = "force-dynamic";
 
 // Rate limit: 2 minutes between verification emails
 const RATE_LIMIT_SECONDS = 120;
@@ -20,7 +24,7 @@ export async function POST() {
     // Get profile with rate limit check
     const { data: profile } = await supabase
       .from("profiles")
-      .select("email, email_confirmed, last_verification_sent_at")
+      .select("email, full_name, email_confirmed, last_verification_sent_at")
       .eq("id", user.id)
       .single();
 
@@ -87,26 +91,27 @@ export async function POST() {
       .update({ last_verification_sent_at: new Date().toISOString() })
       .eq("id", user.id);
 
-    // Build verification URL - must point to the API route, not the page
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-    const verificationUrl = `${baseUrl}/api/auth/verify-email?token=${token}`;
+    // Send verification email using Resend
+    const emailResult = await sendVerificationEmail({
+      userId: user.id,
+      userEmail: profile.email || user.email || "",
+      userName: profile.full_name || profile.email?.split("@")[0] || "User",
+      verificationToken: token,
+    });
 
-    // Send email using Supabase Auth's built-in email (magic link approach)
-    // OR use a custom email service like Resend/SendGrid
-    // For simplicity, we'll use Supabase's invite email as a workaround
-    // In production, use a proper email service
+    if (!emailResult.success) {
+      console.error("Email send failed:", emailResult.error);
+      return NextResponse.json(
+        { error: "Failed to send verification email. Please try again." },
+        { status: 500 }
+      );
+    }
 
-    // Option 1: Return verification URL for testing (remove in production)
-    // Option 2: Use Resend/SendGrid API to send custom email
-
-    // For now, we'll send the verification URL back (for testing)
-    // In production, integrate with an email service
+    console.log("[VERIFICATION] Email sent to:", profile.email);
 
     return NextResponse.json({
       success: true,
       message: "Verification email sent! Check your inbox.",
-      // Remove this in production - only for testing
-      ...(process.env.NODE_ENV === "development" && { verificationUrl }),
     });
   } catch (error) {
     console.error("Send verification error:", error);
