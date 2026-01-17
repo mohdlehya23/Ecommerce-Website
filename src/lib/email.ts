@@ -51,7 +51,7 @@ const EMAIL_CONFIG = {
 // =====================================================
 
 export async function sendEmail(
-  options: SendEmailOptions
+  options: SendEmailOptions,
 ): Promise<SendEmailResult> {
   const adminClient = createAdminClient();
   let logId: string | undefined;
@@ -67,7 +67,7 @@ export async function sendEmail(
         p_reference_type: options.referenceType || null,
         p_reference_id: options.referenceId || null,
         p_provider: "resend",
-      }
+      },
     );
 
     if (logError) {
@@ -242,7 +242,7 @@ export function orderReceiptTemplate(params: {
       <td style="color: #fff;">${item.title}</td>
       <td>$${item.price.toFixed(2)}</td>
     </tr>
-  `
+  `,
     )
     .join("");
 
@@ -271,7 +271,7 @@ export function orderReceiptTemplate(params: {
         <tr style="border-top: 2px solid rgba(0,217,255,0.3);">
           <td style="font-weight: 600; color: #fff;">Total</td>
           <td style="font-size: 20px; color: #00ff88;">$${params.totalAmount.toFixed(
-            2
+            2,
           )}</td>
         </tr>
       </table>
@@ -492,8 +492,8 @@ export function emailVerificationTemplate(params: {
         <a href="${
           params.verificationUrl
         }" style="color: #00d9ff; word-break: break-all;">${
-    params.verificationUrl
-  }</a>
+          params.verificationUrl
+        }</a>
       </p>
     </div>
     <div class="footer">
@@ -531,6 +531,80 @@ export async function sendVerificationEmail(params: {
     }),
     template: "email_verification",
     referenceType: "verification",
+    referenceId: params.userId,
+  });
+}
+
+// =====================================================
+// PASSWORD RESET EMAIL TEMPLATE & FUNCTION
+// =====================================================
+
+/**
+ * Password Reset Email Template
+ */
+export function passwordResetTemplate(params: {
+  userName: string;
+  resetUrl: string;
+}): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head><style>${emailStyles}</style></head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 Reset Your Password</h1>
+    </div>
+    <div class="content">
+      <p>Hi ${params.userName},</p>
+      <p>We received a request to reset the password for your Digital Store account. Click the button below to set a new password.</p>
+      
+      <div class="highlight-box">
+        <div class="label">This link expires in 1 hour</div>
+        <p style="color: #888; font-size: 14px; margin-top: 10px;">
+          For security, this link can only be used once
+        </p>
+      </div>
+      
+      <p style="text-align: center;">
+        <a href="${params.resetUrl}" class="button">Reset My Password</a>
+      </p>
+      
+      <p style="color: #888; font-size: 14px;">
+        If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.
+      </p>
+      
+      <p style="color: #666; font-size: 12px; margin-top: 30px;">
+        If the button doesn't work, copy and paste this link into your browser:<br/>
+        <a href="${params.resetUrl}" style="color: #00d9ff; word-break: break-all;">${params.resetUrl}</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>© ${new Date().getFullYear()} Digital Store. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Send password reset email to user
+ */
+export async function sendPasswordResetEmail(params: {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  resetUrl: string;
+}): Promise<SendEmailResult> {
+  return sendEmail({
+    to: params.userEmail,
+    subject: "🔐 Reset your password - Digital Store",
+    html: passwordResetTemplate({
+      userName: params.userName,
+      resetUrl: params.resetUrl,
+    }),
+    template: "password_reset",
+    referenceType: "user",
     referenceId: params.userId,
   });
 }

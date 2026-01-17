@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -16,21 +15,19 @@ export function ForgotPasswordForm() {
     setErrorMessage("");
 
     try {
-      const supabase = createClient();
-
-      // Get the site URL from environment or window
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL ||
-        (typeof window !== "undefined"
-          ? window.location.origin
-          : "http://localhost:3000");
-
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/reset-password`,
+      // Call the API route which handles Supabase reset and Resend email
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: email.toLowerCase().trim() }),
       });
 
-      if (error) {
-        throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Something went wrong");
       }
 
       // Always show success for privacy (don't reveal if email exists)
@@ -39,7 +36,11 @@ export function ForgotPasswordForm() {
     } catch (error) {
       console.error("Password reset error:", error);
       setStatus("error");
-      setErrorMessage("Something went wrong. Please try again.");
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.",
+      );
     } finally {
       setIsLoading(false);
     }

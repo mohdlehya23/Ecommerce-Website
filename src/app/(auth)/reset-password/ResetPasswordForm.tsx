@@ -69,6 +69,18 @@ export function ResetPasswordForm() {
       return;
     }
 
+    // Check for at least one number
+    if (!/\d/.test(password)) {
+      setErrorMessage("Password must contain at least one number");
+      return;
+    }
+
+    // Check for at least one special character
+    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+      setErrorMessage("Password must contain at least one special character");
+      return;
+    }
+
     setIsLoading(true);
     setErrorMessage("");
 
