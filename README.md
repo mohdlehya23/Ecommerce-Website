@@ -9,6 +9,7 @@ A modern, production-ready e-commerce marketplace for selling digital products a
 | **Frontend** | Next.js 14+ (App Router), TypeScript, Tailwind CSS, Framer Motion |
 | **Backend**  | Supabase (PostgreSQL, Auth, Storage, RLS)                         |
 | **Payments** | PayPal Checkout & PayPal Payouts API                              |
+| **Email**    | Resend (custom branded emails)                                    |
 | **State**    | Zustand (cart with localStorage persistence)                      |
 
 ## ✨ Features
@@ -16,7 +17,8 @@ A modern, production-ready e-commerce marketplace for selling digital products a
 ### For Buyers
 
 - 🔐 Email/Password & Google OAuth authentication
-- ✉️ Email verification with custom tokens
+- ✉️ Email verification with custom branded emails
+- 🔑 Password reset via custom Resend templates
 - 🛍️ Browse products by category (E-books, Templates, Consulting)
 - 💳 Secure PayPal checkout
 - 📦 Dashboard with order history & secure downloads
@@ -81,7 +83,7 @@ src/
 │   │   └── settings/
 │   ├── api/
 │   │   ├── admin/            # Admin APIs
-│   │   ├── auth/             # Email verification
+│   │   ├── auth/             # Email verification, Password Reset
 │   │   ├── payouts/          # Payout processing
 │   │   │   ├── request/      # Seller requests payout
 │   │   │   ├── process/      # Admin processes via PayPal
@@ -106,7 +108,8 @@ src/
 │   ├── layout/               # Navbar, Footer, LayoutWrapper
 │   └── products/             # Product cards & filters
 ├── lib/
-│   ├── supabase/             # Supabase clients
+│   ├── supabase/             # Supabase clients (client, server, admin)
+│   ├── email.ts              # Resend email utility & templates
 │   └── admin.ts              # Admin utilities
 └── stores/
     └── cartStore.ts          # Zustand cart
@@ -127,6 +130,7 @@ src/
 | `admin_users`               | Platform administrators              |
 | `admin_audit_logs`          | Admin action audit trail             |
 | `email_verification_tokens` | Custom email verification            |
+| `email_send_logs`           | Email delivery tracking              |
 
 ## 🚀 Getting Started
 
@@ -144,31 +148,22 @@ cp .env.local.example .env.local
 
 **Required:**
 
-| Variable                        | Description                  |
-| ------------------------------- | ---------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase project URL         |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key            |
-| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase service role key    |
-| `NEXT_PUBLIC_PAYPAL_CLIENT_ID`  | PayPal client ID             |
-| `PAYPAL_CLIENT_SECRET`          | PayPal client secret         |
-| `PAYPAL_CLIENT_ID`              | PayPal Payouts API client ID |
-| `PAYPAL_SECRET`                 | PayPal Payouts API secret    |
-| `CRON_SECRET`                   | Secret for cron job auth     |
+| Variable                        | Description               |
+| ------------------------------- | ------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase project URL      |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key         |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase service role key |
+| `NEXT_PUBLIC_PAYPAL_CLIENT_ID`  | PayPal client ID          |
+| `PAYPAL_CLIENT_SECRET`          | PayPal client secret      |
+| `PAYPAL_MODE`                   | `sandbox` or `live`       |
+| `CRON_SECRET`                   | Secret for cron job auth  |
+| `RESEND_API_KEY`                | Resend API key for emails |
+| `EMAIL_FROM`                    | Sender email address      |
 
 ### 3. Set Up Supabase
 
 1. Create project at [supabase.com](https://supabase.com)
-2. Run migrations in order:
-   - `001_initial_schema.sql`
-   - `002_multi_seller.sql`
-   - `004_fix_rls_recursion.sql`
-   - `005_admin_users_and_admin_management.sql`
-   - `006_add_email_confirmed.sql`
-   - `007_auto_confirm_email_trigger.sql`
-   - `008_email_verification_tokens.sql`
-   - `009_cleanup_sample_data.sql`
-   - `010_seller_payout_system.sql`
-   - `011_add_sellers_updated_at.sql`
+2. Run migrations in order (001 through 018)
 3. Create storage buckets: `downloads`, `avatars`, `product-images`
 4. Add yourself as first admin:
    ```sql
@@ -178,12 +173,10 @@ cp .env.local.example .env.local
 ### 4. Configure PayPal Webhooks
 
 1. Go to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications/sandbox)
-2. Add webhook URL: `https://yourdomain.com/api/payouts/paypal-webhook`
-3. Subscribe to events:
-   - `PAYMENT.PAYOUTSBATCH.SUCCESS`
-   - `PAYMENT.PAYOUTS-ITEM.SUCCEEDED`
-   - `PAYMENT.PAYOUTS-ITEM.FAILED`
-   - `PAYMENT.PAYOUTSBATCH.DENIED`
+2. Add webhook URLs:
+   - Checkout: `https://yourdomain.com/api/paypal/checkout-webhook`
+   - Payouts: `https://yourdomain.com/api/payouts/paypal-webhook`
+3. Subscribe to required events (see PRODUCTION_CHECKLIST.md)
 
 ### 5. Run Development Server
 
@@ -204,24 +197,26 @@ Open [http://localhost:3000](http://localhost:3000)
 - Last-admin deletion protection
 - 14-day escrow on seller earnings
 - Atomic database transactions for payouts
+- Custom password reset with single-use tokens
 
 ## 📖 Recent Updates
 
 ### January 2026
 
-- ✅ Fixed seller product creation (column names, constraints)
+- ✅ Implemented forgot password flow with custom Resend emails
+- ✅ Fixed order items quantity bug (multiple units now recorded correctly)
+- ✅ Fixed seller earnings calculation for multi-quantity orders
+- ✅ Enhanced password validation (8+ chars, number, special char)
+- ✅ Added password reset email template
+- ✅ Fixed fulfill_order_from_webhook RPC column collision
 - ✅ Implemented email verification with custom tokens
-- ✅ Fixed login redirect for authenticated users
-- ✅ Fixed seller page access (user_id → id fix)
-- ✅ Added product status consistency (published vs active)
-- ✅ Implemented unique slug generation for products
-- ✅ Fixed Next.js Image for external URLs (using `<img>`)
 - ✅ Implemented automated seller payout system
 - ✅ Added 14-day escrow for seller earnings
 - ✅ Created PayPal Payouts API integration
-- ✅ Added admin payout approval console
-- ✅ Fixed navbar visibility after admin exit
-- ✅ Fixed payout settings form
+
+## 📚 Additional Documentation
+
+- **[PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md)** - Detailed production deployment guide
 
 ## 📄 License
 

@@ -7,13 +7,13 @@ This comprehensive guide covers PayPal configuration, Supabase security hardenin
 ## 📋 Table of Contents
 
 1. [Environment Variables](#1️⃣-environment-variables)
-2. [PayPal Advanced Configuration](#2️⃣-paypal-advanced-configuration-live-webhooks)
-3. [Database Security Hardening](#3️⃣-database-security-hardening-supabase)
-4. [Transactional Emails](#4️⃣-transactional-emails--deliverability)
-5. [Cron Jobs Setup](#5️⃣-cron-jobs-setup)
+2. [PayPal Configuration](#2️⃣-paypal-configuration)
+3. [Database Security](#3️⃣-database-security-supabase)
+4. [Email Setup](#4️⃣-email-setup-resend)
+5. [Cron Jobs](#5️⃣-cron-jobs-setup)
 6. [Security Checklist](#6️⃣-security-checklist)
-7. [Production Readiness Tests](#7️⃣-production-readiness-tests)
-8. [Monitoring & Alerting](#8️⃣-monitoring--alerting)
+7. [Production Tests](#7️⃣-production-readiness-tests)
+8. [Monitoring](#8️⃣-monitoring--alerting)
 9. [Troubleshooting](#9️⃣-troubleshooting)
 
 ---
@@ -29,12 +29,14 @@ Create a `.env.local` (or `.env.production`) file with all required variables:
 | `SUPABASE_SERVICE_ROLE_KEY`     | Service role key        | ⚠️ **Keep secret!** Never expose client-side |
 | `NEXT_PUBLIC_PAYPAL_CLIENT_ID`  | Sandbox ID              | 🔄 **Switch to LIVE Client ID**              |
 | `PAYPAL_CLIENT_ID`              | Sandbox ID              | 🔄 **Switch to LIVE Client ID**              |
-| `PAYPAL_SECRET`                 | Sandbox secret          | 🔄 **Switch to LIVE Secret**                 |
+| `PAYPAL_CLIENT_SECRET`          | Sandbox secret          | 🔄 **Switch to LIVE Secret**                 |
 | `PAYPAL_MODE`                   | `sandbox`               | 🔄 **Change to `live`**                      |
 | `NEXT_PUBLIC_SITE_URL`          | `http://localhost:3000` | 🔄 **Change to production URL**              |
 | `CRON_SECRET`                   | Random string           | Generate new secure secret                   |
 | `PAYPAL_WEBHOOK_ID`             | Sandbox webhook         | 🔄 **Create new LIVE webhook**               |
 | `PAYPAL_CHECKOUT_WEBHOOK_ID`    | Sandbox webhook         | 🔄 **Create new LIVE webhook**               |
+| `RESEND_API_KEY`                | Resend API key          | Required for custom emails                   |
+| `EMAIL_FROM`                    | Sender email            | e.g., `Store <no-reply@yourdomain.com>`      |
 
 ### Generate Secure CRON_SECRET
 
@@ -44,25 +46,23 @@ openssl rand -base64 32
 
 ---
 
-## 2️⃣ PayPal Advanced Configuration (Live Webhooks)
+## 2️⃣ PayPal Configuration
 
-When switching to Live environment, subscribe to these events for proper refund and dispute handling.
-
-### ✅ Recommended Checkout Webhook Events
+### Checkout Webhook Events
 
 | Event                       | Description                      |
 | --------------------------- | -------------------------------- |
 | `CHECKOUT.ORDER.APPROVED`   | Order approved                   |
 | `PAYMENT.CAPTURE.COMPLETED` | Payment completed                |
 | `PAYMENT.CAPTURE.DENIED`    | Payment denied                   |
-| `PAYMENT.CAPTURE.PENDING`   | Payment pending ⭐ **New**       |
+| `PAYMENT.CAPTURE.PENDING`   | Payment pending                  |
 | `PAYMENT.CAPTURE.REFUNDED`  | Payment refunded ⭐ **Critical** |
 | `PAYMENT.CAPTURE.REVERSED`  | Payment reversed ⭐ **Critical** |
 
-> [!CAUTION] > **REFUNDED and REVERSED events are essential!**  
-> When a customer receives a refund, the webhook must update `order.payment_status` and prevent new download links (Signed URLs) from being issued.
+> [!CAUTION]
+> **REFUNDED and REVERSED events are essential!** When a customer receives a refund, the webhook must update order status and prevent new download links.
 
-### ✅ Payouts Webhook Events
+### Payouts Webhook Events
 
 | Event                            | Description                 |
 | -------------------------------- | --------------------------- |
@@ -71,7 +71,7 @@ When switching to Live environment, subscribe to these events for proper refund 
 | `PAYMENT.PAYOUTS-ITEM.FAILED`    | Individual payout failed    |
 | `PAYMENT.PAYOUTSBATCH.DENIED`    | Payout batch denied         |
 
-### Setup Steps for Live Webhooks
+### Setup Steps
 
 1. Go to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/applications)
 2. Create a **Live Application** (not Sandbox)
@@ -84,11 +84,9 @@ When switching to Live environment, subscribe to these events for proper refund 
 
 ---
 
-## 3️⃣ Database Security Hardening (Supabase)
+## 3️⃣ Database Security (Supabase)
 
-Supabase strongly recommends applying these standards before going public.
-
-### ✅ Security & Network
+### Security & Network
 
 | Setting                  | Description                                  | Status |
 | ------------------------ | -------------------------------------------- | ------ |
@@ -97,7 +95,7 @@ Supabase strongly recommends applying these standards before going public.
 | **MFA for Admins**       | Enable two-factor auth for Supabase accounts | ☐      |
 | **RLS Enabled**          | Row Level Security on all tables             | ☐      |
 
-### ✅ Backups & Recovery
+### Backups & Recovery
 
 | Setting              | Description                                       | Status |
 | -------------------- | ------------------------------------------------- | ------ |
@@ -105,9 +103,9 @@ Supabase strongly recommends applying these standards before going public.
 | **Retention Period** | Understand backup retention duration              | ☐      |
 | **PITR**             | Point-in-Time Recovery for second-level precision | ☐      |
 
-### ✅ Supabase Production Setup
+### Supabase Setup Steps
 
-1. Run all migrations in order (001 through 016)
+1. Run all migrations in order (001 through 018)
 2. Create Storage Buckets:
    - `downloads` (private - for digital products)
    - `product-images` (public - for thumbnails)
@@ -116,51 +114,47 @@ Supabase strongly recommends applying these standards before going public.
    ```sql
    INSERT INTO admin_users (user_id) VALUES ('<your-user-id>');
    ```
-4. Add production URL to Allowed Redirect URLs
+4. Add production URL to Allowed Redirect URLs (Auth settings)
 
 ---
 
-## 4️⃣ Transactional Emails & Deliverability
+## 4️⃣ Email Setup (Resend)
 
-> [!IMPORTANT]
-> Default Supabase email settings are **not sufficient** for production!
+The platform uses Resend for custom branded transactional emails.
 
-### ✅ Setup Steps
+### Email Types
 
-#### 1. Choose SMTP Provider
+| Email Type          | Template                     | Trigger                |
+| ------------------- | ---------------------------- | ---------------------- |
+| Email Verification  | `emailVerificationTemplate`  | User registration      |
+| Password Reset      | `passwordResetTemplate`      | Forgot password        |
+| Order Receipt       | `orderReceiptTemplate`       | Successful purchase    |
+| New Sale            | `newSaleTemplate`            | Seller receives a sale |
+| Payout Confirmation | `payoutConfirmationTemplate` | Admin processes payout |
 
-| Provider     | Features                                |
-| ------------ | --------------------------------------- |
-| **Resend**   | Easy, modern API, excellent integration |
-| **SendGrid** | Reliable, advanced analytics            |
-| **AWS SES**  | Cheapest for high volume                |
+### Setup Steps
 
-#### 2. Configure SMTP in Supabase
+1. Create account at [resend.com](https://resend.com)
+2. Get API key and add to `RESEND_API_KEY`
+3. Verify your domain for best deliverability
 
-1. Go to: **Authentication → SMTP Settings**
-2. Enter: Host, Port, User, Password
-3. Use official email: `no-reply@yourdomain.com`
+### Domain Authentication (SPF/DKIM/DMARC)
 
-#### 3. Domain Authentication (SPF/DKIM/DMARC)
-
-Add these records to your domain's DNS:
+Add these DNS records:
 
 ```dns
 # SPF Record
-TXT  @  "v=spf1 include:_spf.yourmailprovider.com ~all"
+TXT  @  "v=spf1 include:amazonses.com ~all"
 
-# DKIM Record (get from email provider)
+# DKIM Record (get from Resend dashboard)
 TXT  resend._domainkey  "v=DKIM1; k=rsa; p=..."
 
 # DMARC Record
 TXT  _dmarc  "v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com"
 ```
 
-> [!TIP] > **Goal:** Prevent invoices and verification emails from landing in Spam folder
-
-#### 4. Email Send Logging (Optional)
-
-The platform includes an `email_send_logs` table for tracking failures and retries.
+> [!TIP]
+> Use [mail-tester.com](https://mail-tester.com) to verify your email configuration.
 
 ---
 
@@ -205,12 +199,15 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 | Admin user added to `admin_users` table                | ☐      |
 | SSL enabled on domain                                  | ☐      |
 | Webhooks working correctly                             | ☐      |
+| Resend API key configured                              | ☐      |
+| Email domain authenticated (SPF/DKIM)                  | ☐      |
 
 ---
 
 ## 7️⃣ Production Readiness Tests
 
-> [!WARNING] > **Do not open the site to the public before verifying these tests on the Live environment!**
+> [!WARNING]
+> **Do not open the site to the public before verifying these tests!**
 
 ### 🛡️ Refund Test (Critical)
 
@@ -222,24 +219,27 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 | Verify order status changed to `refunded`                    | ☐      |
 | **Critical:** Verify site refuses to issue new download link | ☐      |
 
-### 📧 Email Deliverability Test
+### 📧 Email Tests
 
 | Test                                        | Status |
 | ------------------------------------------- | ------ |
 | Registration → Verification email received  | ☐      |
-| Purchase → Invoice email received           | ☐      |
+| Forgot password → Reset email received      | ☐      |
+| Purchase → Receipt email received           | ☐      |
 | Payout → Seller notification email received | ☐      |
-| Gmail "Show original" → SPF=PASS            | ☐      |
-| Gmail "Show original" → DKIM=PASS           | ☐      |
+| Emails not landing in spam                  | ☐      |
 
 ### 👤 User Tests
 
 | Test                         | Status |
 | ---------------------------- | ------ |
 | Register new user            | ☐      |
+| Verify email                 | ☐      |
 | Login                        | ☐      |
+| Reset password               | ☐      |
 | Browse products              | ☐      |
 | Add to cart                  | ☐      |
+| Add multiple quantities      | ☐      |
 | Complete PayPal checkout     | ☐      |
 | Download files (Signed URLs) | ☐      |
 | View invoice                 | ☐      |
@@ -276,9 +276,9 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 ## 8️⃣ Monitoring & Alerting
 
 > [!CAUTION]
-> Without monitoring, webhooks may stop working and money could be lost without your knowledge!
+> Without monitoring, webhooks may stop working and money could be lost!
 
-### Recommended Setup
+### Recommended Tools
 
 | Tool                 | Function                    |
 | -------------------- | --------------------------- |
@@ -286,13 +286,14 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 | **UptimeRobot**      | API availability monitoring |
 | **Vercel Analytics** | Performance analytics       |
 
-### Sensitive APIs to Monitor
+### Critical APIs to Monitor
 
 ```
 /api/paypal/*
 /api/payouts/*
 /api/cron/*
 /api/downloads/*
+/api/auth/*
 ```
 
 ### Required Alerts
@@ -300,6 +301,7 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 - ☐ Immediate alert on Webhook failure
 - ☐ Alert on Cron Job failure
 - ☐ Alert on high error rate
+- ☐ Alert on email delivery failures
 
 ---
 
@@ -326,12 +328,27 @@ curl -X POST https://yourdomain.com/api/cron/release-escrow \
 3. Check available balance is sufficient
 4. Review admin logs for error messages
 
-### Emails Landing in Spam
+### Emails Not Delivered
 
-1. Verify SPF Record is set up
-2. Verify DKIM Record is set up
-3. Verify DMARC Record is set up
-4. Use [mail-tester.com](https://mail-tester.com) to check
+1. Verify `RESEND_API_KEY` is set
+2. Check Resend dashboard for delivery status
+3. Verify SPF/DKIM records are correct
+4. Use [mail-tester.com](https://mail-tester.com) to diagnose
+
+### Password Reset Not Working
+
+1. Verify Resend API key is valid
+2. Check `NEXT_PUBLIC_SITE_URL` is correct
+3. Verify user exists in auth.users
+4. Check email_send_logs for errors
+
+### Order Items Missing
+
+If seller earnings are incorrect:
+
+1. Check `order_items` table has correct number of rows
+2. Verify each quantity unit has separate row
+3. Run `fulfill_order_from_webhook` RPC manually if needed
 
 ---
 
