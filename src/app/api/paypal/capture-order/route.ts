@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     if (!orderID || !items) {
       return NextResponse.json(
         { error: "Missing required fields" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     const captureData = await captureResponse.json();
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       console.error("Payment not completed:", captureData);
       return NextResponse.json(
         { error: "Payment not completed", success: false },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -77,14 +77,14 @@ export async function POST(request: Request) {
     if (!user) {
       return NextResponse.json(
         { error: "User not authenticated", success: false },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
     // Calculate total
     const totalAmount = items.reduce(
       (sum: number, item: OrderItem) => sum + item.price * item.quantity,
-      0
+      0,
     );
 
     // Create order in database
@@ -103,17 +103,20 @@ export async function POST(request: Request) {
       console.error("Order creation error:", orderError);
       return NextResponse.json(
         { error: "Failed to create order", success: false },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    // Create order items
-    const orderItems = items.map((item: OrderItem) => ({
-      order_id: order.id,
-      product_id: item.productId,
-      license_type: item.licenseType,
-      price: item.price,
-    }));
+    // Create order items - expand by quantity so each unit is a separate row
+    // This ensures seller earnings are calculated correctly per unit
+    const orderItems = items.flatMap((item: OrderItem) =>
+      Array.from({ length: item.quantity }, () => ({
+        order_id: order.id,
+        product_id: item.productId,
+        license_type: item.licenseType,
+        price: item.price,
+      })),
+    );
 
     const { error: itemsError } = await supabase
       .from("order_items")
@@ -139,7 +142,7 @@ export async function POST(request: Request) {
           p_order_id: order.id,
           p_paypal_capture_id: captureId,
           p_escrow_days: 14,
-        }
+        },
       );
 
       if (fulfillmentError) {
@@ -176,7 +179,7 @@ export async function POST(request: Request) {
               profiles:seller_id (email, full_name)
             )
           )
-        `
+        `,
         )
         .eq("id", order.id)
         .single();
@@ -216,7 +219,7 @@ export async function POST(request: Request) {
     console.error("Capture order error:", error);
     return NextResponse.json(
       { error: "Internal server error", success: false },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
